@@ -1,2 +1,2 @@
-# Multi-Agent Deliberation System
+# Heterogeneous Multi-Agent Reasoning System
 
