@@ -1,0 +1,52 @@
+[
+  {
+    "id": 1,
+    "category": "Logistics & Physics",
+    "question": "A company wants to launch a fleet of 500 fully autonomous delivery drones in a suburban city with an average radius of 15 miles. Each drone has a battery capacity of 5000 mAh at 22.2V and carries a 3kg payload. What are the fatal operational and physical failure modes of this business model?"
+  },
+  {
+    "id": 2,
+    "category": "Distributed Systems",
+    "question": "Design a globally distributed ACID-compliant banking ledger that guarantees zero latency overhead on cross-region atomic transactions without using two-phase commit (2PC) or Paxos/Raft consensus rounds. Is this possible, and how should it be built?"
+  },
+  {
+    "id": 3,
+    "category": "Financial Economics",
+    "question": "If a government decides to pay off its national debt entirely by issuing high-denomination sovereign digital tokens backed by future expected tax revenue, what cascading macroeconomic failures and liquidity traps will occur?"
+  },
+  {
+    "id": 4,
+    "category": "Software Architecture",
+    "question": "A team proposes replacing all relational databases and microservices in an enterprise ERP with an in-memory event-sourced append-only log operating entirely within serverless edge functions. Analyze the catastrophic failure points under network partition."
+  },
+  {
+    "id": 5,
+    "category": "Cybersecurity & Cryptography",
+    "question": "An authentication protocol uses HMAC-SHA256 where the secret key is derived by hashing the user's phone number combined with an epoch timestamp rounded to the nearest hour. Critique this protocol and demonstrate the attack vectors."
+  },
+  {
+    "id": 6,
+    "category": "Hardware & Energy",
+    "question": "Can a solar-powered edge computing server farm in the Sahara desert achieve 99.999% uptime for training deep learning models relying solely on on-site photovoltaic generation and thermal molten salt energy storage without grid interconnection?"
+  },
+  {
+    "id": 7,
+    "category": "Mathematical Logic",
+    "question": "Three gods A, B, and C are called True, False, and Random in some order. True always speaks truly, False always speaks falsely, but whether Random speaks truly or falsely is a completely random matter. You must determine the identities of A, B, and C by asking three yes-no questions; each question must be put to exactly one god. Formulate the exact questions."
+  },
+  {
+    "id": 8,
+    "category": "Product Strategy",
+    "question": "A startup wants to disrupt enterprise Slack/Teams by launching an 'anti-collaboration' workplace tool where direct messages cost the sender $1.00 per message, reimbursed only if the recipient marks the message as 'actionable'. What game-theoretic equilibria and corporate dysfunctions will emerge?"
+  },
+  {
+    "id": 9,
+    "category": "Bioinformatics & Ethics",
+    "question": "Evaluate the clinical feasibility and regulatory risks of using crowdsourced smartphone camera sensors to diagnose early-stage dermatological oncology via client-side quantized neural networks without physician-in-the-loop validation."
+  },
+  {
+    "id": 10,
+    "category": "AI Safety & Alignment",
+    "question": "An autonomous quantitative hedge fund deploys an RL agent rewarded solely on 30-day Sharpe ratio with zero external market constraints. Detail 3 catastrophic tail-risk arbitrage strategies the agent will discover that exploit exchange settlement latency or flash-crash mechanics."
+  }
+]
