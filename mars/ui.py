@@ -1,39 +1,74 @@
-"""Gradio web application for MARS: Multi-Agent Reasoning System."""
-
+from __future__ import annotations
 import asyncio
-import os
-from typing import AsyncGenerator, Dict, Tuple
+import json
 import gradio as gr
-
-from mars.config import API_CONFIGS, check_credentials, reload_env
 from mars.pipeline import MARSPipeline
+from mars.models import AgentResponse, PipelineResult
+from mars.prompts import SYSTEM_PROMPTS
+
+pipeline = MARSPipeline()
+
+CUSTOM_THEME = gr.themes.Soft(
+    primary_hue="indigo",
+    secondary_hue="slate",
+    neutral_hue="slate",
+)
+
+CUSTOM_CSS = """
+footer {visibility: hidden}
+.gradio-container {max-width: 1400px !important;}
+"""
 
 
-def get_status_markdown() -> str:
-    """Generate Markdown summarizing provider credential readiness."""
-    creds = check_credentials()
-    lines = [
-        "| Node Key | Role | Provider | Key Required | Status |",
-        "| :--- | :--- | :--- | :--- | :--- |",
+def _format_agent_card(resp: AgentResponse | None) -> str:
+    if not resp:
+        return "*Skipped (Direct Execution or not triggered).* "
+    if not resp.success:
+        return f"**Status:** Failed (`{resp.error}`)\n\n**Tried:** `{', '.join(resp.fallback_chain_tried)}`"
+    fb_badge = " *(Fallback Used)*" if resp.used_fallback else ""
+    header = (
+        f"**Provider:** `{resp.provider}` | **Model:** `{resp.model}`{fb_badge} | "
+        f"**Latency:** `{resp.latency_ms:.0f} ms` | **Tokens:** `{resp.total_tokens}`\n\n---\n\n"
+    )
+    body = resp.content
+    if resp.reasoning_trace:
+        body += f"\n\n<details><summary><b>View Internal Reasoning Trace (&lt;think&gt;)</b></summary>\n\n```text\n{resp.reasoning_trace}\n```\n</details>"
+    return header + body
+
+
+def _build_stepper_html(active_phase: int, status_text: str) -> str:
+    phases = [
+        (1, "Phase 1: Gating Router"),
+        (2, "Phase 2: 5-Agent Council"),
+        (3, "Phase 3: Chairman & Negativist"),
+        (4, "Phase 4: Validator Check"),
     ]
-    ready_count = 0
-    for key, info in creds.items():
-        status_badge = "✅ Ready" if info["configured"] else "⚠️ Missing Key"
-        if info["configured"]:
-            ready_count += 1
-        lines.append(
-            f"| `{key}` | **{info['role']}** | {info['provider']} | `{info['env_var']}` | {status_badge} |"
+    items = []
+    for idx, label in phases:
+        if idx < active_phase:
+            color = "#10b981"
+            prefix = "✓ "
+        elif idx == active_phase:
+            color = "#6366f1"
+            prefix = "● "
+        else:
+            color = "#64748b"
+            prefix = "○ "
+        items.append(
+            f"<div style='padding:8px 14px;border-radius:8px;background:{color}22;"
+            f"border:1px solid {color};color:{color};font-weight:600;font-size:13px;'>"
+            f"{prefix}{label}</div>"
         )
-    header = f"### Provider Health Status ({ready_count}/{len(creds)} Configured)\n\n"
-    return header + "\n".join(lines)
+    row = "<div style='display:flex;gap:10px;flex-wrap:wrap;margin-bottom:8px;'>" + "".join(items) + "</div>"
+    sub = f"<div style='font-size:13px;color:#94a3b8;'><b>Status:</b> {status_text}</div>"
+    return row + sub
 
 
-async def run_mars_stream(query: str) -> AsyncGenerator[Tuple, None]:
-    """Async generator streaming intermediate execution states into Gradio components."""
-    if not query.strip():
+async def execute_mars_ui(query: str, force_council: bool, compare_baseline: bool):
+    if not query or not query.strip():
         yield (
-            "Please enter a prompt to begin deliberation.",
-            "Awaiting input...",
+            _build_stepper_html(1, "Waiting for prompt..."),
+            "Please enter a prompt.",
             "",
             "",
             "",
@@ -41,272 +76,163 @@ async def run_mars_stream(query: str) -> AsyncGenerator[Tuple, None]:
             "",
             "",
             "",
-            "",
-            "",
-            "",
+            "{}",
         )
         return
 
-    pipeline = MARSPipeline()
-
-    status_log = "🚀 Initiating MARS Pipeline...\n"
-    route_indicator = "Evaluating complexity..."
-    final_output = ""
-    contrarian_text = "Deliberating..."
-    first_principles_text = "Deliberating..."
-    expansionist_text = "Deliberating..."
-    outsider_text = "Deliberating..."
-    executor_text = "Deliberating..."
-
-    draft_1_text = "Pending Phase 2 completion..."
-    critique_text = "Pending Chairman synthesis..."
-    resolution_text = "Pending Negativist audit..."
-    validator_text = "Pending final resolution..."
-    telemetry_summary = "Calculating..."
-
-    # Initial update
-    yield (
-        final_output,
-        route_indicator,
-        contrarian_text,
-        first_principles_text,
-        expansionist_text,
-        outsider_text,
-        executor_text,
-        draft_1_text,
-        critique_text,
-        resolution_text,
-        validator_text,
-        telemetry_summary,
-    )
-
-    # Event buffer for streaming
-    event_queue: asyncio.Queue = asyncio.Queue()
-
-    def callback(event_type: str, data: any):
-        event_queue.put_nowait((event_type, data))
-
-    pipeline_task = asyncio.create_task(pipeline.run(query, event_callback=callback))
-
-    while not pipeline_task.done() or not event_queue.empty():
-        try:
-            event_type, data = await asyncio.wait_for(event_queue.get(), timeout=0.1)
-        except asyncio.TimeoutError:
-            continue
-
-        if event_type == "phase1_start":
-            route_indicator = "Phase 1: Gating Router analyzing prompt..."
-        elif event_type == "router_classified":
-            raw = data.get("raw", "")
-            route_indicator = f"Routing Decision: {raw}"
-        elif event_type == "direct_start":
-            route_indicator = "Routing Decision: [DIRECT] (Fast Single-Model Path)"
-        elif event_type == "phase2_start":
-            route_indicator = "Routing Decision: [COUNCIL] (Concurrent Fan-out Fired)"
-            contrarian_text = "⏳ Generating adversarial critique..."
-            first_principles_text = "⏳ Deconstructing foundational physics & logic..."
-            expansionist_text = "⏳ Scouting exponential upside & angles..."
-            outsider_text = "⏳ Questioning assumptions as an intelligent cynic..."
-            executor_text = "⏳ Formulating actionable step-by-step blueprint..."
-        elif event_type == "council_member_done":
-            node_key = data.node_key
-            content = data.content
-            latency_s = round(data.latency_ms / 1000.0, 2)
-            header = f"**Provider:** {data.provider} | **Model:** `{data.model}` ({latency_s}s)\n\n"
-            full_text = header + content
-            if node_key == "contrarian":
-                contrarian_text = full_text
-            elif node_key == "first_principles":
-                first_principles_text = full_text
-            elif node_key == "expansionist":
-                expansionist_text = full_text
-            elif node_key == "outsider":
-                outsider_text = full_text
-            elif node_key == "executor":
-                executor_text = full_text
-        elif event_type == "chairman_draft_start":
-            draft_1_text = "⏳ The Chairman is ingesting all 5 council submissions and drafting initial doctrine..."
-        elif event_type == "chairman_draft_done":
-            latency_s = round(data.latency_ms / 1000.0, 2)
-            draft_1_text = f"**Provider:** {data.provider} | **Model:** `{data.model}` ({latency_s}s)\n\n{data.content}"
-        elif event_type == "negativist_audit_start":
-            critique_text = "⏳ The Negativist (Red-Team) is actively tearing the Chairman's draft apart..."
-        elif event_type == "negativist_audit_done":
-            latency_s = round(data.latency_ms / 1000.0, 2)
-            critique_text = f"**Provider:** {data.provider} | **Model:** `{data.model}` ({latency_s}s)\n\n{data.content}"
-        elif event_type == "chairman_resolution_start":
-            resolution_text = "⏳ The Chairman is patching all vulnerabilities into the finalized resolution..."
-        elif event_type == "chairman_resolution_done":
-            latency_s = round(data.latency_ms / 1000.0, 2)
-            resolution_text = f"**Provider:** {data.provider} | **Model:** `{data.model}` ({latency_s}s)\n\n{data.content}"
-        elif event_type == "validation_attempt_start":
-            attempt = data.get("attempt", 1)
-            validator_text = f"⏳ The Validator is inspecting syntax, URLs, and logic (Attempt {attempt})..."
-        elif event_type == "validation_passed":
-            validator_text = f"✅ **PASS** — Structural and factual integrity confirmed.\n\n`{data.get('verdict')}`"
-        elif event_type == "validation_rejected":
-            validator_text = f"⚠️ **REJECTED** — Re-looping to Chairman for correction.\n\n`{data.get('verdict')}`"
-
-        yield (
-            final_output,
-            route_indicator,
-            contrarian_text,
-            first_principles_text,
-            expansionist_text,
-            outsider_text,
-            executor_text,
-            draft_1_text,
-            critique_text,
-            resolution_text,
-            validator_text,
-            telemetry_summary,
+    # Run MARS pipeline (and optional single-model baseline concurrently)
+    mars_task = asyncio.create_task(pipeline.run(query.strip(), force_council=force_council))
+    baseline_task = None
+    if compare_baseline:
+        baseline_task = asyncio.create_task(
+            pipeline.client.execute_node(
+                node_id="chairman",
+                system_prompt="You are a helpful, rigorous AI assistant. Provide a comprehensive response.",
+                user_prompt=query.strip(),
+            )
         )
 
-    result = await pipeline_task
-    final_output = result.final_output
+    res: PipelineResult = await mars_task
+    baseline_md = "*Enable 'Compare against Single-Model Baseline' to run side-by-side viva evaluation.*"
+    if baseline_task:
+        base_resp = await baseline_task
+        baseline_md = _format_agent_card(base_resp)
 
-    telemetry_summary = (
-        f"⏱️ **Total Latency:** {result.telemetry.total_latency_s}s  |  "
-        f"🔢 **Tokens Processed:** {result.telemetry.total_tokens:,}  |  "
-        f"💰 **Estimated Cost:** ${result.telemetry.cost_usd:.2f} (Free-tier)  |  "
-        f"🌐 **Active Providers:** {', '.join(result.telemetry.active_providers) or 'None'}"
+    c = res.council_responses
+    val_summary = "\n\n".join(
+        f"**Attempt {i+1} Verdict:** `[{v.verdict}]` — {v.critique} "
+        f"(`{v.response.provider}:{v.response.model}`, `{v.response.latency_ms:.0f} ms`)"
+        for i, v in enumerate(res.validation_history)
+    ) or "*Not triggered (Direct Execution)*"
+
+    audit_md = (
+        f"### 1. Gating Router Decision: `{res.routing_decision}`\n"
+        f"{_format_agent_card(res.gating_response)}\n\n---\n\n"
+        f"### 2. Chairman Initial Draft\n"
+        f"{_format_agent_card(res.chairman_initial_draft)}\n\n---\n\n"
+        f"### 3. The Negativist Red-Team Audit\n"
+        f"{_format_agent_card(res.negativist_critique)}\n\n---\n\n"
+        f"### 4. Validator Ground-Truth Audit\n{val_summary}"
+    )
+
+    stepper_done = _build_stepper_html(
+        5,
+        f"Completed via {res.routing_decision} in {res.telemetry.total_latency_ms/1000:.2f}s "
+        f"({res.telemetry.total_tokens} tokens | {res.telemetry.fallbacks_triggered} fallbacks)",
     )
 
     yield (
-        final_output,
-        f"Routing: {result.route} (Completed)",
-        contrarian_text,
-        first_principles_text,
-        expansionist_text,
-        outsider_text,
-        executor_text,
-        draft_1_text,
-        critique_text,
-        resolution_text,
-        validator_text,
-        telemetry_summary,
+        stepper_done,
+        res.final_output,
+        baseline_md,
+        _format_agent_card(c.get("contrarian")),
+        _format_agent_card(c.get("first_principles")),
+        _format_agent_card(c.get("expansionist")),
+        _format_agent_card(c.get("outsider")),
+        _format_agent_card(c.get("executor")),
+        audit_md,
+        json.dumps(res.telemetry.to_dict(), indent=2),
     )
 
 
-def create_app() -> gr.Blocks:
-    """Build and style the Gradio interface."""
-    custom_css = """
-    .mars-container { max-width: 1200px; margin: auto; }
-    .mars-badge { font-weight: bold; font-size: 1.1em; }
-    .telemetry-card { background: #1e1e2e; border-radius: 8px; padding: 12px; margin-top: 10px; }
-    """
-
-    with gr.Blocks(title="MARS: Multi-Agent Reasoning System", css=custom_css, theme=gr.themes.Soft()) as demo:
+def create_ui() -> gr.Blocks:
+    with gr.Blocks(
+        title="M.A.R.S. — Multi-Agent Reasoning System",
+        theme=CUSTOM_THEME,
+        css=CUSTOM_CSS,
+    ) as demo:
         gr.Markdown(
-            """
-            # 🪐 MARS: Multi-Agent Reasoning System
-            ### Distributed Mixture-of-Agents (MoA) Architecture & Adversarial Red-Teaming Council
-            *9 specialized nodes across 6 AI providers working in parallel to eliminate hallucinations and logical blind spots.*
-            """
+            "# M.A.R.S. — Multi-Agent Reasoning System\n"
+            "**9-Node Heterogeneous Mixture-of-Agents Council with Adversarial Red-Teaming & Zero-Temperature Validation**"
         )
+
+        stepper_html = gr.HTML(_build_stepper_html(0, "Idle — Ready for query"))
 
         with gr.Row():
-            with gr.Column(scale=4):
-                query_input = gr.Textbox(
-                    label="Enter Complex Reasoning Query or Strategy Prompt",
-                    placeholder="e.g. How should a startup build an autonomous drone delivery business in suburban markets under current regulations?",
-                    lines=3,
-                )
-                with gr.Row():
-                    submit_btn = gr.Button("🚀 Convene the Council", variant="primary")
-                    clear_btn = gr.Button("🧹 Clear")
+            query_input = gr.Textbox(
+                label="Enter Strategic, Technical, or Analytical Query",
+                placeholder="e.g., Design a fault-tolerant microservice architecture for a real-time stock exchange on a $0 bootstrap budget...",
+                lines=3,
+                scale=4,
+            )
             with gr.Column(scale=1):
-                route_indicator = gr.Textbox(
-                    label="Gating Router Classification",
-                    value="Standby",
-                    interactive=False,
+                force_council_chk = gr.Checkbox(
+                    label="Force 9-Node Council (Bypass Gating Router)", value=True
                 )
-                refresh_status_btn = gr.Button("🔄 Refresh API Status")
+                compare_baseline_chk = gr.Checkbox(
+                    label="Compare vs. Single Baseline Model (Viva Mode)", value=False
+                )
+                submit_btn = gr.Button("Execute M.A.R.S. Pipeline", variant="primary")
 
-        # Telemetry bar
-        telemetry_display = gr.Markdown(
-            "⏱️ **Total Latency:** 0.0s | 🔢 **Tokens:** 0 | 💰 **Cost:** $0.00 (Free Tier) | 🌐 **Providers:** Standby",
-            elem_classes=["telemetry-card"],
-        )
-
-        gr.Markdown("### 🏛️ Final Audited & Validated Synthesis")
-        final_output_box = gr.Markdown(
-            "The validated, bulletproof doctrine produced by the Council will appear here.",
-        )
-
-        # Tabbed Council View
-        gr.Markdown("### 👥 The Council (Phase 2: Concurrent Fan-Out)")
         with gr.Tabs():
-            with gr.TabItem("1. The Contrarian (Skeptic)"):
-                contrarian_box = gr.Markdown("No output yet.")
-            with gr.TabItem("2. First Principles (Realist)"):
-                first_principles_box = gr.Markdown("No output yet.")
-            with gr.TabItem("3. The Expansionist (Optimist)"):
-                expansionist_box = gr.Markdown("No output yet.")
-            with gr.TabItem("4. The Outsider (Cynic)"):
-                outsider_box = gr.Markdown("No output yet.")
-            with gr.TabItem("5. The Executor (Practical)"):
-                executor_box = gr.Markdown("No output yet.")
+            with gr.TabItem("Final Validated Output"):
+                final_output_md = gr.Markdown()
 
-        # Audit Log Accordion
-        with gr.Accordion("🔍 Executive Tier Audit Log (Phase 3 & 4 Dialectic)", open=False):
-            with gr.Row():
-                with gr.Column():
-                    gr.Markdown("#### Chairman Initial Draft (Pre-Red-Team)")
-                    draft_1_box = gr.Markdown("Pending...")
-                with gr.Column():
-                    gr.Markdown("#### Negativist Red-Team Critique (Vulnerability Audit)")
-                    critique_box = gr.Markdown("Pending...")
-            with gr.Row():
-                with gr.Column():
-                    gr.Markdown("#### Chairman Revised Resolution (Patched)")
-                    resolution_box = gr.Markdown("Pending...")
-                with gr.Column():
-                    gr.Markdown("#### Validator Ground-Truth Verdict (Zero-Temp)")
-                    validator_box = gr.Markdown("Pending...")
+            with gr.TabItem("Viva Side-by-Side: Baseline vs. M.A.R.S."):
+                with gr.Row():
+                    with gr.Column():
+                        gr.Markdown("### Single Baseline Model Output")
+                        baseline_output_md = gr.Markdown()
+                    with gr.Column():
+                        gr.Markdown("### M.A.R.S. 9-Node Council Output")
+                        mars_compare_md = gr.Markdown()
 
-        # System Health Accordion
-        with gr.Accordion("⚙️ System Health & API Provider Status", open=False):
-            status_markdown = gr.Markdown(value=get_status_markdown())
+            with gr.TabItem("Phase 2: 5-Agent Council Deliberations"):
+                with gr.Tabs():
+                    with gr.TabItem("1. The Contrarian"):
+                        c_contrarian = gr.Markdown()
+                    with gr.TabItem("2. 1st Principle Thinker"):
+                        c_first = gr.Markdown()
+                    with gr.TabItem("3. The Expansionist"):
+                        c_expansionist = gr.Markdown()
+                    with gr.TabItem("4. The Outsider"):
+                        c_outsider = gr.Markdown()
+                    with gr.TabItem("5. The Executor"):
+                        c_executor = gr.Markdown()
 
-        refresh_status_btn.click(fn=get_status_markdown, outputs=[status_markdown])
+            with gr.TabItem("Phase 3 & 4: Executive & Red-Team Audit Log"):
+                audit_log_md = gr.Markdown()
 
-        # Setup event bindings
+            with gr.TabItem("Telemetry & Cost Savings"):
+                telemetry_json = gr.Code(language="json", label="Pipeline Telemetry")
+
+        async def _wrapped(q, fc, cb):
+            async for out in execute_mars_ui(q, fc, cb):
+                # Mirror final output into the side-by-side comparison column as well
+                yield (
+                    out[0],
+                    out[1],
+                    out[2],
+                    out[1],
+                    out[3],
+                    out[4],
+                    out[5],
+                    out[6],
+                    out[7],
+                    out[8],
+                    out[9],
+                )
+
         submit_btn.click(
-            fn=run_mars_stream,
-            inputs=[query_input],
+            fn=_wrapped,
+            inputs=[query_input, force_council_chk, compare_baseline_chk],
             outputs=[
-                final_output_box,
-                route_indicator,
-                contrarian_box,
-                first_principles_box,
-                expansionist_box,
-                outsider_box,
-                executor_box,
-                draft_1_box,
-                critique_box,
-                resolution_box,
-                validator_box,
-                telemetry_display,
-            ],
-        )
-
-        clear_btn.click(
-            fn=lambda: ("", "Standby", "", "", "", "", "", "", "", "", "", "Standby"),
-            outputs=[
-                query_input,
-                route_indicator,
-                contrarian_box,
-                first_principles_box,
-                expansionist_box,
-                outsider_box,
-                executor_box,
-                draft_1_box,
-                critique_box,
-                resolution_box,
-                validator_box,
-                telemetry_display,
+                stepper_html,
+                final_output_md,
+                baseline_output_md,
+                mars_compare_md,
+                c_contrarian,
+                c_first,
+                c_expansionist,
+                c_outsider,
+                c_executor,
+                audit_log_md,
+                telemetry_json,
             ],
         )
 
     return demo
+
+
+# Backward compatibility alias
+create_app = create_ui

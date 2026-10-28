@@ -13,8 +13,9 @@ if sys.platform == "win32":
 from rich.console import Console
 from rich.table import Table
 
+import gradio as gr
 from mars.config import check_credentials, reload_env
-from mars.ui import create_app
+from mars.ui import CUSTOM_CSS, CUSTOM_THEME, create_app
 
 console = Console(force_terminal=True, legacy_windows=False)
 
@@ -64,7 +65,11 @@ def main():
 
     app = create_app()
     console.print(f"[bold green]Starting Gradio web server at http://{args.host}:{args.port}[/bold green]")
-    app.queue().launch(server_name=args.host, server_port=args.port, share=args.share)
+    app.queue().launch(
+        server_name=args.host,
+        server_port=args.port,
+        share=args.share,
+    )
 
 
 if __name__ == "__main__":

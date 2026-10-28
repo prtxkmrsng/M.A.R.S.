@@ -1,133 +1,72 @@
-"""Benchmark runner comparing Single-Model Baseline vs MARS Multi-Agent Council."""
-
-import argparse
 import asyncio
-import csv
 import json
-import os
-import sys
-import time
 from pathlib import Path
-
-if sys.platform == "win32":
-    try:
-        sys.stdout.reconfigure(encoding="utf-8")
-        sys.stderr.reconfigure(encoding="utf-8")
-    except Exception:
-        pass
-
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-
-from rich.console import Console
-from rich.table import Table
-
-from mars.client import fetch_agent_response
 from mars.pipeline import MARSPipeline
 
-console = Console(force_terminal=True, legacy_windows=False)
+JUDGE_SYSTEM_PROMPT = (
+    "You are an impartial academic benchmark judge. You will be given a complex User Query, "
+    "Response A (Single-Model Baseline), and Response B (MARS 9-Node Council). "
+    "Evaluate both responses on a 1-10 scale across three criteria:\n"
+    "1. Factuality & Logical Rigor\n"
+    "2. Blind-Spot & Risk Detection\n"
+    "3. Practical Actionability\n"
+    "Output strict JSON with keys: "
+    '{"baseline_score": float, "mars_score": float, "winner": "MARS"|"BASELINE"|"TIE", "rationale": str}'
+)
 
 
-async def run_baseline_model(question: str) -> dict:
-    """Run a single frontier/standard LLM prompt as baseline."""
-    start = time.perf_counter()
-    resp = await fetch_agent_response(
-        node_key="chairman",
-        system_prompt="You are an expert AI advisor. Provide a comprehensive, rigorous, and logically sound response.",
-        user_query=question,
-    )
-    duration_s = round(time.perf_counter() - start, 2)
-    return {
-        "content": resp.content,
-        "latency_s": duration_s,
-        "tokens": resp.tokens_used,
-        "provider": resp.provider,
-        "model": resp.model,
-    }
-
-
-async def main():
-    parser = argparse.ArgumentParser(description="Run MARS Benchmark Suite")
-    parser.add_argument("--limit", type=int, default=None, help="Limit number of questions to evaluate")
-    parser.add_argument("--output-dir", type=str, default="benchmarks", help="Output directory")
-    args = parser.parse_args()
-
+async def run_benchmarks() -> None:
     questions_path = Path(__file__).parent / "questions.json"
-    with open(questions_path, "r", encoding="utf-8") as f:
-        questions = json.load(f)
-
-    if args.limit:
-        questions = questions[: args.limit]
-
-    out_dir = Path(args.output_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
-
-    csv_path = out_dir / "benchmark_results.csv"
-    report_path = out_dir / "benchmark_report.md"
+    if not questions_path.exists():
+        questions = [
+            "Design a zero-budget distributed rate limiter for an API gateway handling 10,000 req/sec across 3 regions.",
+            "A SaaS startup wants to replace its entire customer support team with an autonomous LLM agent tomorrow. Analyze this strategy and provide an execution plan.",
+        ]
+    else:
+        with open(questions_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            questions = [q["question"] if isinstance(q, dict) else str(q) for q in data]
 
     pipeline = MARSPipeline()
     results = []
 
-    console.print(f"[bold green]Starting MARS Benchmark Suite ({len(questions)} items)...[/bold green]\n")
+    for idx, q in enumerate(questions, 1):
+        print(f"\n[{idx}/{len(questions)}] Running benchmark query: {q[:80]}...")
+        mars_res = await pipeline.run(q, force_council=True)
+        baseline_resp = await pipeline.client.execute_node(
+            node_id="chairman",
+            system_prompt="You are a helpful, rigorous AI assistant.",
+            user_prompt=q,
+        )
 
-    for idx, item in enumerate(questions, 1):
-        q_id = item["id"]
-        category = item["category"]
-        q_text = item["question"]
+        judge_prompt = (
+            f"### USER QUERY:\n{q}\n\n"
+            f"### RESPONSE A (Baseline):\n{baseline_resp.content}\n\n"
+            f"### RESPONSE B (MARS Council):\n{mars_res.final_output}"
+        )
+        judge_resp = await pipeline.client.execute_node(
+            node_id="validator",
+            system_prompt=JUDGE_SYSTEM_PROMPT,
+            user_prompt=judge_prompt,
+        )
 
-        console.print(f"[bold cyan]Evaluating Question {idx}/{len(questions)} [ID: {q_id}] ({category})[/bold cyan]")
-        console.print(f"[italic]{q_text[:90]}...[/italic]")
+        results.append(
+            {
+                "query": q,
+                "baseline_latency_ms": round(baseline_resp.latency_ms, 1),
+                "mars_latency_ms": round(mars_res.telemetry.total_latency_ms, 1),
+                "mars_total_tokens": mars_res.telemetry.total_tokens,
+                "fallbacks_triggered": mars_res.telemetry.fallbacks_triggered,
+                "judge_evaluation": judge_resp.content,
+            }
+        )
 
-        # 1. Baseline Run
-        console.print("  → Running Baseline Model...")
-        baseline = await run_baseline_model(q_text)
-
-        # 2. MARS Council Run
-        console.print("  → Running MARS Council Pipeline...")
-        mars_result = await pipeline.run(q_text)
-
-        critique_summary = "N/A"
-        if mars_result.synthesis_result and mars_result.synthesis_result.negativist_critique:
-            critique_summary = mars_result.synthesis_result.negativist_critique.content[:150].replace("\n", " ")
-
-        row = {
-            "id": q_id,
-            "category": category,
-            "question": q_text,
-            "baseline_provider": baseline["provider"],
-            "baseline_model": baseline["model"],
-            "baseline_latency_s": baseline["latency_s"],
-            "baseline_tokens": baseline["tokens"],
-            "mars_route": mars_result.route,
-            "mars_latency_s": mars_result.telemetry.total_latency_s,
-            "mars_tokens": mars_result.telemetry.total_tokens,
-            "mars_providers": "|".join(mars_result.telemetry.active_providers),
-            "mars_validation_passed": mars_result.synthesis_result.validation_passed if mars_result.synthesis_result else True,
-            "redteam_audit_sample": critique_summary,
-        }
-        results.append(row)
-        console.print(f"  ✓ Finished in {mars_result.telemetry.total_latency_s}s (Tokens: {mars_result.telemetry.total_tokens})\n")
-
-    # Write CSV
-    if results:
-        with open(csv_path, "w", newline="", encoding="utf-8") as f:
-            writer = csv.DictWriter(f, fieldnames=list(results[0].keys()))
-            writer.writeheader()
-            writer.writerows(results)
-
-    # Write Markdown Report
-    with open(report_path, "w", encoding="utf-8") as f:
-        f.write("# MARS Benchmark Evaluation Report\n\n")
-        f.write(f"**Total Evaluated Queries:** {len(results)}\n\n")
-        f.write("| ID | Category | Baseline Latency | MARS Latency | Baseline Tokens | MARS Tokens | Red-Team Audit Sample |\n")
-        f.write("| :--- | :--- | :--- | :--- | :--- | :--- | :--- |\n")
-        for r in results:
-            f.write(
-                f"| {r['id']} | {r['category']} | {r['baseline_latency_s']}s | {r['mars_latency_s']}s | "
-                f"{r['baseline_tokens']} | {r['mars_tokens']} | {r['redteam_audit_sample']}... |\n"
-            )
-
-    console.print(f"[bold green]✓ Benchmark completed![/bold green] Results written to [cyan]{csv_path}[/cyan] and [cyan]{report_path}[/cyan]")
+    out_path = Path(__file__).parent / "benchmark_results.json"
+    with open(out_path, "w", encoding="utf-8") as f:
+        json.dump(results, f, indent=2)
+    print(f"\nBenchmark complete! Saved results to {out_path}")
+    await pipeline.client.close()
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    asyncio.run(run_benchmarks())

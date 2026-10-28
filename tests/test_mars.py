@@ -1,94 +1,60 @@
-"""Unit tests for MARS modules and data structures."""
-
-import pytest
-from mars.config import API_CONFIGS, check_credentials
-from mars.fallbacks import CircuitBreaker, NODE_FALLBACKS
-from mars.models import AgentResponse, CouncilResult, PipelineResult, TelemetryData
-from mars.prompts import PROMPTS_BY_NODE
-
-
-def test_api_configs_completeness():
-    expected_nodes = [
-        "gating_router",
-        "contrarian",
-        "first_principles",
-        "expansionist",
-        "outsider",
-        "executor",
-        "chairman",
-        "negativist",
-        "validator",
-    ]
-    for node in expected_nodes:
-        assert node in API_CONFIGS, f"Missing config for {node}"
-        assert "base_url" in API_CONFIGS[node]
-        assert "api_key_env" in API_CONFIGS[node]
-        assert "model" in API_CONFIGS[node]
+import unittest
+import asyncio
+from unittest.mock import AsyncMock, patch
+from mars.client import strip_reasoning_tokens, CircuitBreaker, LLMClientManager
+from mars.pipeline import MARSPipeline
+from mars.models import AgentResponse
 
 
-def test_prompts_completeness():
-    expected_prompt_keys = [
-        "gating_router",
-        "contrarian",
-        "first_principles",
-        "expansionist",
-        "outsider",
-        "executor",
-        "chairman_synthesis",
-        "negativist",
-        "chairman_resolution",
-        "validator",
-    ]
-    for key in expected_prompt_keys:
-        assert key in PROMPTS_BY_NODE, f"Missing prompt for {key}"
-        assert len(PROMPTS_BY_NODE[key]) > 10
+class TestMARSSystem(unittest.TestCase):
+    def test_strip_reasoning_tokens(self):
+        raw = "<think>\nLet me deconstruct this problem.\n</think>\nHere is the final actionable step."
+        cleaned, trace = strip_reasoning_tokens(raw)
+        self.assertEqual(cleaned, "Here is the final actionable step.")
+        self.assertIn("deconstruct", trace)
+
+    def test_circuit_breaker_isolation(self):
+        cb = CircuitBreaker(failure_threshold=2, cooldown_seconds=60.0)
+        cb.record_transient_failure("groq")
+        self.assertTrue(cb.is_available("groq"))
+        cb.record_transient_failure("groq")
+        self.assertFalse(cb.is_available("groq"))
+        self.assertTrue(cb.is_available("gemini"))
+
+    def test_tag_parsers(self):
+        decision, ans = MARSPipeline._parse_gating_output("**[DIRECT_EXECUTION]** Paris is the capital of France.")
+        self.assertEqual(decision, "DIRECT_EXECUTION")
+        self.assertEqual(ans, "Paris is the capital of France.")
+
+        c_dec, c_body = MARSPipeline._parse_chairman_decision("[REBOOT_COUNCIL] Rethink unit economics.")
+        self.assertEqual(c_dec, "REBOOT_COUNCIL")
+        self.assertEqual(c_body, "Rethink unit economics.")
+
+        passed, verdict, critique = MARSPipeline._parse_validator_output("[REJECT] Unclosed code block.")
+        self.assertFalse(passed)
+        self.assertEqual(verdict, "REJECT")
+        self.assertEqual(critique, "Unclosed code block.")
+
+    def test_pipeline_direct_execution(self):
+        async def _run():
+            pipe = MARSPipeline()
+            pipe.client.execute_node = AsyncMock(
+                return_value=AgentResponse(
+                    node_id="gating_router",
+                    display_name="Gating Router",
+                    provider="cloudflare",
+                    model="@cf/meta/llama-3.1-8b-instruct-fp8",
+                    content="[DIRECT_EXECUTION] 2 + 2 = 4.",
+                    total_tokens=20,
+                )
+            )
+            res = await pipe.run("What is 2 + 2?", force_council=False)
+            self.assertEqual(res.routing_decision, "DIRECT_EXECUTION")
+            self.assertEqual(res.final_output, "2 + 2 = 4.")
+            self.assertEqual(res.telemetry.total_api_calls, 1)
+
+        asyncio.run(_run())
 
 
-def test_circuit_breaker():
-    cb = CircuitBreaker(failure_threshold=2, cooldown_seconds=0.5)
-    provider = "MockProvider"
-
-    assert cb.is_available(provider) is True
-    cb.record_failure(provider)
-    assert cb.is_available(provider) is True
-
-    cb.record_failure(provider)
-    # Tripped
-    assert cb.is_available(provider) is False
-
-    # Success resets
-    cb.record_success(provider)
-    assert cb.is_available(provider) is True
-
-
-def test_models_compiled_council_text():
-    resp1 = AgentResponse(
-        node_key="contrarian",
-        role_name="The Contrarian",
-        content="Critique A",
-        provider="Groq",
-        model="llama-3.1-8b-instant",
-    )
-    resp2 = AgentResponse(
-        node_key="executor",
-        role_name="The Executor",
-        content="Action Plan B",
-        provider="NVIDIA NIM",
-        model="deepseek-ai/deepseek-r1",
-    )
-    council = CouncilResult(
-        query="Test query",
-        responses={"contrarian": resp1, "executor": resp2},
-    )
-    compiled = council.compiled_council_text
-    assert "The Contrarian Output:" in compiled
-    assert "Critique A" in compiled
-    assert "The Executor Output:" in compiled
-    assert "Action Plan B" in compiled
-
-
-def test_check_credentials():
-    status = check_credentials()
-    assert isinstance(status, dict)
-    assert "gating_router" in status
-    assert "chairman" in status
+if __name__ == "__main__":
+    unittest.main()

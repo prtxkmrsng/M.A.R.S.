@@ -11,7 +11,7 @@ MARS (**Multi-Agent Reasoning System**) is a 9-node, multi-provider **Mixture-of
 
 ## 🏛️ System Architecture
 
-Standard single-model inference frequently falls victim to "echo chamber" reasoning and confident hallucinations. MARS executes a 4-phase dialectic pipeline across **6 free-tier AI providers** to simulate a rigorous, highly adversarial boardroom deliberation:
+Standard single-model inference frequently falls victim to "echo chamber" reasoning and confident hallucinations. MARS executes a 4-phase dialectic pipeline across **heterogeneous zero-cost AI providers** to simulate a rigorous, highly adversarial boardroom deliberation:
 
 ```mermaid
 graph TD
@@ -23,14 +23,14 @@ graph TD
 
     A[User Query]:::user --> B{Phase 1: Gating Router}:::router
     
-    B -->|Simple Query: Syntax / Fact| C[Direct Fast-Model Response]:::user
-    B -->|Complex Reasoning| D((Phase 2: Concurrent Fan-Out)):::router
+    B -->|DIRECT_EXECUTION: Syntax / Fact| C[Direct Response]:::user
+    B -->|COUNCIL_ROUTING: Complex Reasoning| D((Phase 2: Concurrent Fan-Out)):::router
 
     D --> E[The Contrarian - Groq]:::agent
-    D --> F[The 1st Principle Thinker - NVIDIA NIM]:::agent
-    D --> G[The Expansionist - OpenRouter]:::agent
+    D --> F[The 1st Principle Thinker - Cloudflare Workers AI]:::agent
+    D --> G[The Expansionist - Groq]:::agent
     D --> H[The Outsider - Mistral AI]:::agent
-    D --> I[The Executor - NVIDIA NIM]:::agent
+    D --> I[The Executor - Cloudflare Workers AI]:::agent
 
     E --> J((Compile Perspectives)):::router
     F --> J
@@ -38,12 +38,13 @@ graph TD
     H --> J
     I --> J
 
-    J --> K[Phase 3: The Chairman Initial Draft - Google Gemini]:::executive
-    K --> L[Phase 3: The Negativist Red-Team Audit - NVIDIA NIM]:::final
-    L --> M[Phase 3: The Chairman Final Resolution]:::executive
-    M --> N{Phase 4: The Validator Ground-Truth - Groq}:::router
+    J --> K[Phase 3A: Chairman Initial Draft - Google Gemini]:::executive
+    K --> L[Phase 3B: The Negativist Red-Team Audit - Mistral AI]:::final
+    L --> M{Phase 3C: Chairman Decision Matrix}:::executive
+    M -->|REBOOT_COUNCIL: Fatal Flaw Found| D
+    M -->|PROCEED: Minor Revisions| N{Phase 4: The Validator Ground-Truth - Groq}:::router
     
-    N -->|PASS: Structurally & Factually Sound| O[Deliver Final Audited Output]:::user
+    N -->|PASS: Verified & Clean| O[Deliver Final Audited Output]:::user
     N -->|REJECT: Correction Loop| M
 ```
 
@@ -53,21 +54,21 @@ graph TD
 
 | Phase | Node | Role | Provider | Default Model | Temp | Purpose |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **Phase 1** | 1 | **Gating Router** | Cloudflare Workers AI | `@cf/meta/llama-3.1-8b-instruct` | 0.0 | Edge triage: `[DIRECT]` vs `[COUNCIL]` |
-| **Phase 2** | 2 | **The Contrarian** | Groq | `llama-3.1-8b-instant` | 0.8 | Skeptic/Pessimist: Identifies fatal flaws |
-| **Phase 2** | 3 | **1st Principle Thinker** | NVIDIA NIM | `meta/llama-3.1-8b-instruct` | 0.7 | Realist: Deconstructs to core physics & math |
-| **Phase 2** | 4 | **The Expansionist** | OpenRouter | `meta-llama/llama-3.3-70b-instruct:free` | 0.85 | Optimist: Spots 100x leverage & scaling angles |
-| **Phase 2** | 5 | **The Outsider** | Mistral AI | `mistral-small-latest` | 0.7 | Cynic: Demands proof and questions motives |
-| **Phase 2** | 6 | **The Executor** | NVIDIA NIM | `deepseek-ai/deepseek-r1` | 0.6 | Practical: Formulates step-by-step blueprint |
-| **Phase 3** | 7 | **The Chairman** | Google AI Studio | `gemini-2.5-flash` | 0.7 | Idealist: Synthesizes & resolves conflicts |
-| **Phase 3** | 8 | **The Negativist** | NVIDIA NIM | `deepseek-ai/deepseek-v3` | 0.8 | Red-Team: Ruthlessly attacks Chairman's draft |
-| **Phase 4** | 9 | **The Validator** | Groq | `llama-3.3-70b-versatile` | 0.0 | Ground-truth auditor: Syntax, URLs, logic |
+| **Phase 1** | 1 | **Gating Router** | Cloudflare Workers AI | `@cf/meta/llama-3.1-8b-instruct-fp8` | 0.0 | Edge triage: `[DIRECT_EXECUTION]` vs `[COUNCIL_ROUTING]` |
+| **Phase 2** | 2 | **The Contrarian** | Groq | `qwen/qwen3.8-27b` | 0.6 | Skeptic/Pessimist: Identifies fatal flaws and structural risks |
+| **Phase 2** | 3 | **1st Principle Thinker** | Cloudflare Workers AI | `@cf/meta/llama-3.3-70b-instruct-fp8-fast` | 0.5 | Realist: Deconstructs to core physics, math, and irreducible truths |
+| **Phase 2** | 4 | **The Expansionist** | Groq | `openai/gpt-oss-120b` | 0.8 | Optimist: Spots asymmetric upsides and second-order scaling angles |
+| **Phase 2** | 5 | **The Outsider** | Mistral AI | `mistral-small-latest` | 0.7 | Cynic: Demands empirical proof and tests human incentives |
+| **Phase 2** | 6 | **The Executor** | Cloudflare Workers AI | `@cf/deepseek-ai/deepseek-r1-distill-qwen-32b` | 0.5 | Practical Realist: Translates to actionable steps & timelines |
+| **Phase 3** | 7 | **The Chairman** | Google AI Studio | `gemini-2.5-flash` | 0.5 | Idealist Synthesizer: Merges council views into comprehensive strategy |
+| **Phase 3** | 8 | **The Negativist** | Mistral AI | `mistral-small-latest` | 0.7 | Adversarial Red-Teamer: Decoupled to eliminate self-bias & 429 contention |
+| **Phase 4** | 9 | **The Validator** | Groq | `openai/gpt-oss-120b` | 0.0 | Ground-truth auditor: Zero-temperature compiler, syntax, and logic check |
 
 ---
 
 ## 🚀 Quickstart Guide
 
-### 1. Clone and Activate Environment
+### 1. Activate Environment
 ```bash
 conda deactivate
 conda activate AIML
@@ -89,32 +90,43 @@ Verify your credentials anytime:
 python main.py --check-env
 ```
 
-### 4. Launch the Web Interface
+### 4. Run System Verification
+Run automated tests and diagnostic sanity checks:
+```bash
+python verify_all.py
+```
+*(For complete operational documentation, see [GUIDE_RUN_AND_VERIFY.md](file:///d:/Programming/Projects/Multi-Agent%20Reasoning%20System/GUIDE_RUN_AND_VERIFY.md))*
+
+### 5. Launch the Web Interface
 ```bash
 python main.py
 ```
-Open your browser at `http://127.0.0.1:7860`.
+Open your browser at `http://127.0.0.1:7860`. Includes:
+- **Viva Side-by-Side Mode:** Direct comparison between single-model baseline and the 9-node MARS council.
+- **Council Deliberation Tabs:** Independent persona analysis review with collapsible `<think>` reasoning traces.
+- **Executive Audit Log:** Full audit trail from Initial Draft to Red-Team Critique to Validator Verification.
 
-### 5. CLI Debugging Mode
-Run complex prompts directly from the command line:
+### 6. CLI Debugging Mode
+Run prompts directly from the command line:
 ```bash
-python cli.py "How should a startup launch an autonomous drone delivery fleet in suburban markets?"
+python cli.py "Explain the trade-offs of microservices vs monolith for an early-stage startup."
 ```
 
 ---
 
-## 📊 Benchmarking Suite
+## 📊 Automated Benchmarking Suite (LLM-as-a-Judge)
 
-Execute comparative evaluations between single frontier model baselines and the full MARS council:
+Execute comparative evaluations between single baseline models and the full MARS council with automated blind judge evaluation across Factuality, Blind-Spot Detection, and Actionability:
 ```bash
-python benchmarks/run_benchmark.py --limit 3
+python benchmarks/run_benchmark.py
 ```
-Results and hallucination interception logs are saved to `benchmarks/benchmark_results.csv` and `benchmarks/benchmark_report.md`.
+Evaluation metrics and rationales are exported to `benchmarks/benchmark_results.json`.
 
 ---
 
 ## 🛡️ Resilience & Circuit Breakers
 
-- **Automatic Failover Chains:** Each node features secondary fallback providers (e.g., Groq ↔ NVIDIA NIM ↔ OpenRouter).
-- **Circuit Breakers:** Repeated rate-limit or outage errors trip automated cooldowns to prevent cascading stalls.
-- **Graceful Degradation:** If individual free-tier providers encounter brief timeouts, the executive synthesis proceeds with quorum warning logs.
+- **Automatic Multi-Hop Failovers:** Each node is backed by an ordered list of cross-provider fallback models.
+- **Targeted Circuit Breakers:** Circuit breakers trip exclusively on transient infrastructure issues (429 rate limits, 5xx server errors, timeouts) without poisoning healthy model endpoints on 400/404 errors.
+- **Unstripped Reasoning Tag Protection:** Internal `<think>...</think>` traces from reasoning models (DeepSeek-R1 / Qwen3) are cleanly isolated to prevent context pollution and token budget exhaustion.
+- **Dynamic Council Reboot:** Chairman can issue `[REBOOT_COUNCIL]` when critical foundational flaws are uncovered, re-running the council with feedback.
